@@ -3,7 +3,6 @@ import express, { Request, Response } from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import dotenv from "dotenv";
-import fetch from "node-fetch";
 import crypto from "crypto";
 
 dotenv.config();
