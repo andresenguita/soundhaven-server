@@ -29,26 +29,36 @@ if (
 
 const app = express();
 
+// ✅ CORS: permite localhost y Vercel
+const allowedOrigins = [
+  "http://localhost:5174",
+  "https://soundhaven-client.vercel.app"
+];
+
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use(cookieParser(COOKIE_SECRET));
 
-// Utilidad para generar el state
 function generateState(): string {
   return crypto.randomBytes(16).toString("hex");
 }
 
-// Healthcheck
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", time: Date.now() });
 });
 
-// 1️⃣ Login: redirige a Spotify
 app.get("/api/auth/login", (_req: Request, res: Response) => {
   const state = generateState();
   res.cookie("spotify_state", state, {
@@ -74,7 +84,6 @@ app.get("/api/auth/login", (_req: Request, res: Response) => {
   res.redirect(`https://accounts.spotify.com/authorize?${params}`);
 });
 
-// 2️⃣ Callback: canjea code, guarda refresh_token y redirige con access_token
 app.get("/api/auth/callback", async (req: Request, res: Response) => {
   const { code, state } = req.query as Record<string, string>;
   const storedState = req.cookies.spotify_state;
@@ -118,7 +127,6 @@ app.get("/api/auth/callback", async (req: Request, res: Response) => {
   }
 });
 
-// 3️⃣ Refresh: usa refresh_token de cookie
 app.get("/api/auth/refresh", async (req: Request, res: Response) => {
   const refresh_token = req.cookies.refresh_token;
   if (!refresh_token) {
@@ -161,7 +169,6 @@ app.get("/api/auth/refresh", async (req: Request, res: Response) => {
   }
 });
 
-// 4️⃣ Logout
 app.post("/api/auth/logout", (_req: Request, res: Response) => {
   res.clearCookie("refresh_token", {
     httpOnly: true,
@@ -171,7 +178,6 @@ app.post("/api/auth/logout", (_req: Request, res: Response) => {
   res.sendStatus(204);
 });
 
-// 5️⃣ Dummy cards endpoint (¡sin retorno implícito!)
 const dummyCards = [
   {
     img: "/art/art1.png",
@@ -193,11 +199,9 @@ const dummyCards = [
   },
 ];
 app.get("/api/cards", (_req: Request, res: Response): void => {
-  // Llamamos a res.json sin hacer return, para que el handler devuelva void
   res.json(dummyCards);
 });
 
-// Arrancamos el servidor
 app.listen(Number(PORT), () => {
   console.log(`🚀 Backend escuchando en http://localhost:${PORT}`);
 });
