@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",            // Version de JS de salida
+    "module": "CommonJS",          // Sistema de módulos para Node.js
+    "rootDir": "src",              // Código fuente
+    "outDir": "dist",              // JS compilado
+    "strict": true,                // Chequeos estrictos de TS
+    "esModuleInterop": true,       // Para importar módulos CommonJS
+    "skipLibCheck": true           // Ignorar chequeo de librerías
+  },
+  "include": ["src/**/*"]
+}

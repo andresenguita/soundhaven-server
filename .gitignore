@@ -1,0 +1,26 @@
+# Node modules
+node_modules/
+
+# Env variables
+.env
+.env.local
+.env.production
+
+# Compiled output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# System
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# TypeScript cache
+*.tsbuildinfo
