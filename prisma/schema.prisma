@@ -1,0 +1,22 @@
+// prisma/schema.prisma
+
+// Generador del cliente Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Fuente de datos: Railway (PostgreSQL)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Se lee desde el archivo .env
+}
+
+// Modelo principal para registrar interacciones con cartas
+model DiscoveryLog {
+  id         String   @id @default(cuid())       // ID único generado automáticamente
+  userId     String                                // ID del usuario (de Spotify o interno)
+  cardTitle  String                                // Título de la carta mostrada
+  trackUri   String                                // URI de la canción (spotify:track:...)
+  added      Boolean                               // true si se añadió a la playlist
+  createdAt  DateTime @default(now())             // Timestamp automático
+}

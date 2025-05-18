@@ -1,10 +1,10 @@
-// server/src/index.ts
-import express, { Request, Response } from "express";
+import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import fetch from "node-fetch";
+import { PrismaClient } from "@prisma/client";
 
 import type {
   SpotifyUser,
@@ -14,6 +14,8 @@ import type {
 } from "./types/spotify";
 
 dotenv.config();
+
+const prisma = new PrismaClient();
 
 const {
   SPOTIFY_CLIENT_ID,
@@ -41,22 +43,22 @@ const app = express();
 
 app.use(
   cors({
-    origin: [CLIENT_VERCEL_URL,CLIENT_URL],
+    origin: [CLIENT_VERCEL_URL, CLIENT_URL],
     credentials: true,
   })
 );
 app.use(express.json());
 app.use(cookieParser(COOKIE_SECRET));
 
-function generateState(): string {
+function generateState() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-app.get("/api/health", (_req: Request, res: Response) => {
+app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", time: Date.now() });
 });
 
-app.get("/api/auth/login", (_req: Request, res: Response) => {
+app.get("/api/auth/login", (_req, res) => {
   const state = generateState();
   res.cookie("spotify_state", state, {
     httpOnly: true,
@@ -81,7 +83,7 @@ app.get("/api/auth/login", (_req: Request, res: Response) => {
   res.redirect(`https://accounts.spotify.com/authorize?${params}`);
 });
 
-app.get("/api/auth/callback", async (req: Request, res: Response) => {
+app.get("/api/auth/callback", async (req, res) => {
   const { code, state, error } = req.query as Record<string, string>;
   const storedState = req.cookies.spotify_state;
 
@@ -131,7 +133,7 @@ app.get("/api/auth/callback", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/auth/refresh", async (req: Request, res: Response) => {
+app.get("/api/auth/refresh", async (req, res) => {
   const refresh_token = req.cookies.refresh_token;
   if (!refresh_token) {
     res.sendStatus(401);
@@ -175,7 +177,7 @@ app.get("/api/auth/refresh", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/auth/logout", (_req: Request, res: Response) => {
+app.post("/api/auth/logout", (_req, res) => {
   res.clearCookie("refresh_token", {
     httpOnly: true,
     sameSite: "lax",
@@ -191,7 +193,7 @@ const dummyCards = [
     artist: "Songs: Ohia",
     cover: "/art/magnoliaElectricCo.png",
     uri: "spotify:track:5Plx6OhvSukqCRdZ52wUXz",
-    description: "A painting by Gustave Courbet"
+    description: "A painting by Gustave Courbet",
   },
   {
     img: "/art/art2.jpg",
@@ -199,7 +201,7 @@ const dummyCards = [
     artist: "Burial",
     cover: "/art/cover1.png",
     uri: "spotify:track:6evpAJCR5GeeHDGgv3aXb3",
-    description: "From the movie Spirited Away"
+    description: "From the movie Spirited Away",
   },
   {
     img: "/art/art3.png",
@@ -207,15 +209,14 @@ const dummyCards = [
     artist: "Björk",
     cover: "/art/vespertine.png",
     uri: "spotify:track:3Te7GWFEecCGPpkWVTjJ1h",
-    description: "From the animated series Love, Death & Robots" 
+    description: "From the animated series Love, Death & Robots",
   },
 ];
 
-app.get("/api/cards", (_req: Request, res: Response): void => {
+app.get("/api/cards", (_req, res) => {
   res.json(dummyCards);
 });
 
-// ✔ Playlist reutilizable
 const getOrCreatePlaylist = async (token: string): Promise<string> => {
   const userRes = await fetch("https://api.spotify.com/v1/me", {
     headers: { Authorization: `Bearer ${token}` },
@@ -261,25 +262,22 @@ const getOrCreatePlaylist = async (token: string): Promise<string> => {
   return newPlaylist.id;
 };
 
-app.post("/api/playlist/create", (req: Request, res: Response) => {
-  (async () => {
-    const auth = req.headers.authorization;
-    if (!auth) return res.status(401).json({ error: "No token" });
+app.post("/api/playlist/create", async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({ error: "No token" });
 
-    const token = auth.replace("Bearer ", "");
+  const token = auth.replace("Bearer ", "");
 
-    try {
-      const playlistId = await getOrCreatePlaylist(token);
-      res.json({ playlist_id: playlistId });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Error creando la playlist" });
-    }
-  })();
+  try {
+    const playlistId = await getOrCreatePlaylist(token);
+    res.json({ playlist_id: playlistId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error creando la playlist" });
+  }
 });
 
-
-app.post("/api/playlist/add", async (req: Request, res: Response) => {
+app.post("/api/playlist/add", async (req, res) => {
   const auth = req.headers.authorization;
   const { uri } = req.body;
 
@@ -306,6 +304,24 @@ app.post("/api/playlist/add", async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al añadir canción" });
+  }
+});
+
+app.post("/api/log", async (req, res) => {
+  const { userId, cardTitle, trackUri, added } = req.body;
+
+  if (!userId || !cardTitle || !trackUri || typeof added !== "boolean") {
+    return res.status(400).json({ error: "Faltan datos obligatorios" });
+  }
+
+  try {
+    const newLog = await prisma.discoveryLog.create({
+      data: { userId, cardTitle, trackUri, added },
+    });
+    res.status(201).json(newLog);
+  } catch (error) {
+    console.error("❌ Error al guardar en la base de datos:", error);
+    res.status(500).json({ error: "Error al registrar en el Discovery Log" });
   }
 });
 
