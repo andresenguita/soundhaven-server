@@ -5,6 +5,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import fetch from "node-fetch";
+
 import type {
   SpotifyUser,
   SpotifyPlaylist,
@@ -19,6 +20,7 @@ const {
   SPOTIFY_CLIENT_SECRET,
   SPOTIFY_REDIRECT_URI,
   CLIENT_URL,
+  CLIENT_VERCEL_URL,
   COOKIE_SECRET,
   PORT = "4000",
 } = process.env;
@@ -28,6 +30,7 @@ if (
   !SPOTIFY_CLIENT_SECRET ||
   !SPOTIFY_REDIRECT_URI ||
   !CLIENT_URL ||
+  !CLIENT_VERCEL_URL ||
   !COOKIE_SECRET
 ) {
   console.error("❌ Faltan vars de entorno en server/.env");
@@ -38,7 +41,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: [CLIENT_VERCEL_URL,CLIENT_URL],
     credentials: true,
   })
 );
