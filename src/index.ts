@@ -4,6 +4,13 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import fetch from "node-fetch";
+import type {
+  SpotifyUser,
+  SpotifyPlaylist,
+  SpotifyPlaylistsResponse,
+  SpotifyTokenResponse,
+} from "./types/spotify";
 
 dotenv.config();
 
@@ -29,25 +36,12 @@ if (
 
 const app = express();
 
-// ✅ CORS: permite localhost y Vercel
-const allowedOrigins = [
-  "http://localhost:5174",
-  "https://soundhaven-client.vercel.app"
-];
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+    origin: CLIENT_URL,
     credentials: true,
   })
 );
-
 app.use(express.json());
 app.use(cookieParser(COOKIE_SECRET));
 
@@ -85,12 +79,18 @@ app.get("/api/auth/login", (_req: Request, res: Response) => {
 });
 
 app.get("/api/auth/callback", async (req: Request, res: Response) => {
-  const { code, state } = req.query as Record<string, string>;
+  const { code, state, error } = req.query as Record<string, string>;
   const storedState = req.cookies.spotify_state;
+
+  if (error === "access_denied") {
+    return res.redirect(`${CLIENT_URL}/login?error=access_denied`);
+  }
+
   if (!state || state !== storedState) {
     res.status(400).send("State mismatch");
     return;
   }
+
   res.clearCookie("spotify_state");
 
   const body = new URLSearchParams({
@@ -107,10 +107,11 @@ app.get("/api/auth/callback", async (req: Request, res: Response) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     });
-    const data: any = await tokenRes.json();
-    if (data.error) {
-      res.status(400).json(data);
-      return;
+
+    const data = (await tokenRes.json()) as SpotifyTokenResponse;
+
+    if (!tokenRes.ok || !data.access_token) {
+      return res.redirect(`${CLIENT_URL}/login?error=invalid_code`);
     }
 
     res.cookie("refresh_token", data.refresh_token, {
@@ -147,8 +148,10 @@ app.get("/api/auth/refresh", async (req: Request, res: Response) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     });
-    const data: any = await tokenRes.json();
-    if (data.error) {
+
+    const data = (await tokenRes.json()) as SpotifyTokenResponse;
+
+    if (!tokenRes.ok || !data.access_token) {
       res.status(400).json(data);
       return;
     }
@@ -181,25 +184,126 @@ app.post("/api/auth/logout", (_req: Request, res: Response) => {
 const dummyCards = [
   {
     img: "/art/art1.png",
-    title: "Spirits in the Night",
-    artist: "Bruce Springsteen",
-    uri: "spotify:track:3T4tUhGYeRNVUGevb0wThu",
+    title: "Farewell Transmission",
+    artist: "Songs: Ohia",
+    cover: "/art/magnoliaElectricCo.png",
+    uri: "spotify:track:5Plx6OhvSukqCRdZ52wUXz",
+    description: "A painting by Gustave Courbet"
   },
   {
     img: "/art/art2.jpg",
-    title: "In a Sentimental Mood",
-    artist: "Duke Ellington",
-    uri: "spotify:track:7tWz5JrEl2l52t291Z76Uh",
+    title: "Archangel",
+    artist: "Burial",
+    cover: "/art/cover1.png",
+    uri: "spotify:track:6evpAJCR5GeeHDGgv3aXb3",
+    description: "From the movie Spirited Away"
   },
   {
     img: "/art/art3.png",
-    title: "Neon Genesis",
-    artist: "Tycho",
-    uri: "spotify:track:4hLou4n0tJV6h4ck0MWX6z",
+    title: "Pagan Poetry",
+    artist: "Björk",
+    cover: "/art/vespertine.png",
+    uri: "spotify:track:3Te7GWFEecCGPpkWVTjJ1h",
+    description: "From the animated series Love, Death & Robots" 
   },
 ];
+
 app.get("/api/cards", (_req: Request, res: Response): void => {
   res.json(dummyCards);
+});
+
+// ✔ Playlist reutilizable
+const getOrCreatePlaylist = async (token: string): Promise<string> => {
+  const userRes = await fetch("https://api.spotify.com/v1/me", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const userData = (await userRes.json()) as SpotifyUser;
+  const userId = userData.id;
+
+  let offset = 0;
+
+  while (true) {
+    const playlistsRes = await fetch(
+      `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const playlistsData = (await playlistsRes.json()) as SpotifyPlaylistsResponse;
+
+    const match = playlistsData.items.find(
+      (p) => p.name.toLowerCase() === "soundhaven"
+    );
+
+    if (match) return match.id;
+
+    if (!playlistsData.next) break;
+    offset += 50;
+  }
+
+  const createRes = await fetch(
+    `https://api.spotify.com/v1/users/${userId}/playlists`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "SoundHaven",
+        description: "Playlist generada automáticamente por SoundHaven",
+        public: false,
+      }),
+    }
+  );
+  const newPlaylist = (await createRes.json()) as SpotifyPlaylist;
+  return newPlaylist.id;
+};
+
+app.post("/api/playlist/create", (req: Request, res: Response) => {
+  (async () => {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: "No token" });
+
+    const token = auth.replace("Bearer ", "");
+
+    try {
+      const playlistId = await getOrCreatePlaylist(token);
+      res.json({ playlist_id: playlistId });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Error creando la playlist" });
+    }
+  })();
+});
+
+
+app.post("/api/playlist/add", async (req: Request, res: Response) => {
+  const auth = req.headers.authorization;
+  const { uri } = req.body;
+
+  if (!auth || !uri) {
+    res.status(400).json({ error: "Faltan datos" });
+    return;
+  }
+
+  const token = auth.replace("Bearer ", "");
+
+  try {
+    const playlistId = await getOrCreatePlaylist(token);
+
+    await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ uris: [uri] }),
+    });
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al añadir canción" });
+  }
 });
 
 app.listen(Number(PORT), () => {
