@@ -20,3 +20,20 @@ model DiscoveryLog {
   added      Boolean                               // true si se añadió a la playlist
   createdAt  DateTime @default(now())             // Timestamp automático
 }
+
+model UserPlaylist {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  playlistId String
+  createdAt  DateTime @default(now())
+}
+
+model Card {
+  id          Int     @id @default(autoincrement())
+  title       String
+  artist      String
+  uri         String  @unique
+  img         String
+  cover       String
+  description String
+}

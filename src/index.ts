@@ -1,3 +1,4 @@
+// src/index.ts
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -5,6 +6,8 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import fetch from "node-fetch";
 import { PrismaClient } from "@prisma/client";
+import path from "path";
+import fs from "fs";
 
 import type {
   SpotifyUser,
@@ -54,9 +57,7 @@ function generateState() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", time: Date.now() });
-});
+/* ------------------------- AUTH -------------------------- */
 
 app.get("/api/auth/login", (_req, res) => {
   const state = generateState();
@@ -186,81 +187,7 @@ app.post("/api/auth/logout", (_req, res) => {
   res.sendStatus(204);
 });
 
-const dummyCards = [
-  {
-    img: "/art/art1.png",
-    title: "Farewell Transmission",
-    artist: "Songs: Ohia",
-    cover: "/art/magnoliaElectricCo.png",
-    uri: "spotify:track:5Plx6OhvSukqCRdZ52wUXz",
-    description: "A painting by Gustave Courbet",
-  },
-  {
-    img: "/art/art2.jpg",
-    title: "Archangel",
-    artist: "Burial",
-    cover: "/art/cover1.png",
-    uri: "spotify:track:6evpAJCR5GeeHDGgv3aXb3",
-    description: "From the movie Spirited Away",
-  },
-  {
-    img: "/art/art3.png",
-    title: "Pagan Poetry",
-    artist: "Björk",
-    cover: "/art/vespertine.png",
-    uri: "spotify:track:3Te7GWFEecCGPpkWVTjJ1h",
-    description: "From the animated series Love, Death & Robots",
-  },
-];
-
-app.get("/api/cards", (_req, res) => {
-  res.json(dummyCards);
-});
-
-const getOrCreatePlaylist = async (token: string): Promise<string> => {
-  const userRes = await fetch("https://api.spotify.com/v1/me", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const userData = (await userRes.json()) as SpotifyUser;
-  const userId = userData.id;
-
-  let offset = 0;
-
-  while (true) {
-    const playlistsRes = await fetch(
-      `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const playlistsData = (await playlistsRes.json()) as SpotifyPlaylistsResponse;
-
-    const match = playlistsData.items.find(
-      (p) => p.name.toLowerCase() === "soundhaven"
-    );
-
-    if (match) return match.id;
-
-    if (!playlistsData.next) break;
-    offset += 50;
-  }
-
-  const createRes = await fetch(
-    `https://api.spotify.com/v1/users/${userId}/playlists`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "SoundHaven",
-        description: "Playlist generada automáticamente por SoundHaven",
-        public: false,
-      }),
-    }
-  );
-  const newPlaylist = (await createRes.json()) as SpotifyPlaylist;
-  return newPlaylist.id;
-};
+/* ------------------------- PLAYLIST -------------------------- */
 
 app.post("/api/playlist/create", async (req, res) => {
   const auth = req.headers.authorization;
@@ -269,11 +196,63 @@ app.post("/api/playlist/create", async (req, res) => {
   const token = auth.replace("Bearer ", "");
 
   try {
-    const playlistId = await getOrCreatePlaylist(token);
-    res.json({ playlist_id: playlistId });
+    const userRes = await fetch("https://api.spotify.com/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const user = (await userRes.json()) as SpotifyUser;
+
+    let record = await prisma.userPlaylist.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (record) {
+      return res.json({ playlist_id: record.playlistId });
+    }
+
+    const createRes = await fetch(
+      `https://api.spotify.com/v1/users/${user.id}/playlists`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "SoundHaven",
+          description: "Playlist generada automáticamente por SoundHaven",
+          public: false,
+        }),
+      }
+    );
+
+    const playlist = (await createRes.json()) as SpotifyPlaylist;
+    
+        // Añadir imagen a la playlist
+/*     const imagePath = path.join(__dirname, "assets", "playlist-cover.jpg");
+    const imageBuffer = fs.readFileSync(imagePath);
+    const base64Image = imageBuffer.toString("base64");
+
+    await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/images`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "image/jpeg",
+      },
+      body: base64Image,
+    }); */
+
+    await prisma.userPlaylist.create({
+      data: {
+        userId: user.id,
+        playlistId: playlist.id,
+      },
+    });
+
+    res.json({ playlist_id: playlist.id });
+    
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error creando la playlist" });
+    console.error("❌ Error creando playlist:", err);
+    res.status(500).json({ error: "Error creando playlist" });
   }
 });
 
@@ -282,46 +261,101 @@ app.post("/api/playlist/add", async (req, res) => {
   const { uri } = req.body;
 
   if (!auth || !uri) {
-    res.status(400).json({ error: "Faltan datos" });
-    return;
+    return res.status(400).json({ error: "Faltan datos" });
   }
 
   const token = auth.replace("Bearer ", "");
 
   try {
-    const playlistId = await getOrCreatePlaylist(token);
-
-    await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ uris: [uri] }),
+    const userRes = await fetch("https://api.spotify.com/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
     });
+    const user = (await userRes.json()) as SpotifyUser;
+
+    const record = await prisma.userPlaylist.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (!record) {
+      return res.status(404).json({ error: "Playlist no encontrada" });
+    }
+
+    const addRes = await fetch(
+      `https://api.spotify.com/v1/playlists/${record.playlistId}/tracks`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ uris: [uri] }),
+      }
+    );
+
+    if (!addRes.ok) {
+      const data = await addRes.json();
+      throw new Error(data.error?.message || "Error al añadir canción");
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error al añadir canción:", err);
     res.status(500).json({ error: "Error al añadir canción" });
   }
 });
 
-app.post("/api/log", async (req, res) => {
-  const { userId, cardTitle, trackUri, added } = req.body;
+/* ------------------------- CARDS -------------------------- */
 
-  if (!userId || !cardTitle || !trackUri || typeof added !== "boolean") {
-    return res.status(400).json({ error: "Faltan datos obligatorios" });
-  }
-
+app.get("/api/cards", async (_req, res) => {
   try {
-    const newLog = await prisma.discoveryLog.create({
-      data: { userId, cardTitle, trackUri, added },
-    });
-    res.status(201).json(newLog);
-  } catch (error) {
-    console.error("❌ Error al guardar en la base de datos:", error);
-    res.status(500).json({ error: "Error al registrar en el Discovery Log" });
+    const cards = await prisma.card.findMany();
+    res.json(cards);
+  } catch (err) {
+    res.status(500).json({ error: "Error al obtener cartas" });
+  }
+});
+
+app.post("/api/cards/seed", async (_req, res) => {
+  try {
+    const dummyCards = [
+      {
+        img: "/art/art1.png",
+        title: "Farewell Transmission",
+        artist: "Songs: Ohia",
+        uri: "spotify:track:5Plx6OhvSukqCRdZ52wUXz",
+        cover: "/art/magnoliaElectricCo.png",
+        description: "A painting by Gustave Courbet",
+      },
+      {
+        img: "/art/art2.jpg",
+        title: "Archangel",
+        artist: "Burial",
+        uri: "spotify:track:6evpAJCR5GeeHDGgv3aXb3",
+        cover: "/art/cover1.png",
+        description: "From the movie Spirited Away",
+      },
+      {
+        img: "/art/art3.png",
+        title: "Pagan Poetry",
+        artist: "Bj\u00f6rk",
+        uri: "spotify:track:3Te7GWFEecCGPpkWVTjJ1h",
+        cover: "/art/vespertine.png",
+        description: "From the animated series Love, Death & Robots",
+      },
+    ];
+
+
+    for (const card of dummyCards) {
+      await prisma.card.upsert({
+        where: { uri: card.uri },
+        update: {},
+        create: card,
+      });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Error al insertar cartas:", err);
+    res.status(500).json({ error: "Error insertando cartas" });
   }
 });
 
