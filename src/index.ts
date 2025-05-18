@@ -306,12 +306,13 @@ app.post("/api/playlist/add", async (req, res) => {
 
 /* ------------------------- CARDS -------------------------- */
 
-app.get("/api/cards", async (_req, res) => {
+app.get("/api/cards", async (req, res) => {
   try {
-    const cards = await prisma.card.findMany();
+    const cards = await prisma.card.findMany(); // ejemplo
     res.json(cards);
-  } catch (err) {
-    res.status(500).json({ error: "Error al obtener cartas" });
+  } catch (error) {
+    console.error("❌ Error en /api/cards:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
