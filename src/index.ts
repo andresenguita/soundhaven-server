@@ -304,6 +304,124 @@ app.post("/api/playlist/add", async (req, res) => {
   }
 });
 
+
+/* ------------------------- DISCOVERIES -------------------------- */
+
+app.post("/api/discovery", async (req, res) => {
+  const { userId, cardTitle, trackUri, added } = req.body;
+
+  if (!userId || !cardTitle || !trackUri) {
+    return res.status(400).json({ error: "Faltan datos obligatorios" });
+  }
+
+  try {
+    const exists = await prisma.discoveryLog.findFirst({
+      where: {
+        userId,
+        trackUri,
+      },
+    });
+
+    if (exists) {
+      return res.status(200).json({ message: "Ya registrado", id: exists.id });
+    }
+
+    const log = await prisma.discoveryLog.create({
+      data: {
+        userId,
+        cardTitle,
+        trackUri,
+        added: added ?? false,
+      },
+    });
+
+    res.json(log);
+  } catch (err) {
+    console.error("Error creando DiscoveryLog:", err);
+    res.status(500).json({ error: "Error interno al registrar" });
+  }
+});
+
+
+app.post("/api/discovery/mark-as-added", async (req, res) => {
+  const { userId, trackUri } = req.body;
+
+  if (!userId || !trackUri) {
+    return res.status(400).json({ error: "Faltan datos obligatorios" });
+  }
+
+  try {
+    const existing = await prisma.discoveryLog.findFirst({
+      where: {
+        userId,
+        trackUri,
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "No se encontró el DiscoveryLog" });
+    }
+
+    // Solo actualizamos si aún no estaba marcado
+    if (!existing.added) {
+      const updated = await prisma.discoveryLog.update({
+        where: { id: existing.id },
+        data: { added: true },
+      });
+      return res.json(updated);
+    }
+
+    return res.status(200).json({ message: "Ya estaba marcado como añadido" });
+  } catch (err) {
+    console.error("❌ Error al actualizar DiscoveryLog:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+
+app.get("/api/discovery/all", async (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) return res.status(400).json({ error: "Falta userId" });
+
+  try {
+    const logs = await prisma.discoveryLog.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json(logs);
+  } catch (err) {
+    console.error("Error obteniendo discovery logs:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+
+app.get("/api/me", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Token faltante" });
+
+  try {
+    const userRes = await fetch("https://api.spotify.com/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await userRes.json();
+
+    if (!data.id) return res.status(500).json({ error: "No se pudo obtener userId" });
+
+    res.json({
+      userId: data.id,
+      avatarUrl: data.images?.[0]?.url ?? null,
+      displayName: data.display_name ?? null,
+    });
+  } catch (err) {
+    console.error("❌ Error al obtener perfil de Spotify:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+
 /* ------------------------- CARDS -------------------------- */
 
 app.get("/api/cards", async (req, res) => {
