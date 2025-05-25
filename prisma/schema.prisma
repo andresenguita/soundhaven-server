@@ -36,4 +36,21 @@ model Card {
   img         String
   cover       String
   description String
+
+  dailyCards  DailyCard[]
 }
+
+// prisma/schema.prisma
+model DailyCard {
+  id      Int      @id @default(autoincrement())
+  userId  String
+  cardId  Int
+  date    DateTime
+
+  /// ⬇️  Prisma ahora encuentra el campo inverso
+  card    Card     @relation(fields: [cardId], references: [id])
+
+  @@unique([userId, cardId, date])
+  @@index([userId, date])
+}
+

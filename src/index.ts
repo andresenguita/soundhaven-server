@@ -506,6 +506,66 @@ app.get("/api/cards", async (req, res) => {
   }
 });
 
+app.get("/api/cards/daily", async (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) return res.status(400).json({ error: "Falta userId" });
+
+  // 00:00 UTC de hoy y de mañana
+  const today   = new Date();
+  const start   = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const end     = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+
+  try {
+    /** 1) ¿Ya hay cartas asignadas para hoy? */
+    let daily = await prisma.dailyCard.findMany({
+      where: {
+        userId,
+        date: { gte: start, lt: end },
+      },
+      include: { card: true },
+    });
+
+    /** 2) Si no existen, las generamos */
+    if (daily.length === 0) {
+      // Cartas que el usuario ya descubrió alguna vez
+      const discovered = await prisma.discoveryLog.findMany({
+        where: { userId },
+        select: { trackUri: true },
+      });
+      const seenUris = discovered.map(d => d.trackUri);
+
+      // Baraja disponible
+      const pool = await prisma.card.findMany({
+        where: { uri: { notIn: seenUris } },
+      });
+
+      // Si el pool es < 3, permitimos repetir (opcional)
+      const candidates = pool.length >= 3 ? pool : await prisma.card.findMany();
+
+      // Elegimos 3 al azar
+      const selected = candidates
+        .sort(() => 0.5 - Math.random())
+        .slice(0, 3);
+
+      await prisma.dailyCard.createMany({
+        data: selected.map(c => ({
+          userId,
+          cardId: c.id,
+          date: start,
+        })),
+      });
+
+      daily = selected.map(card => ({ card } as any));
+    }
+
+    res.json(daily.map(d => d.card));
+  } catch (err) {
+    console.error("❌ /api/cards/daily:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+
 app.post("/api/cards/seed", async (_req, res) => {
   try {
     const dummyCards = [
@@ -518,7 +578,7 @@ app.post("/api/cards/seed", async (_req, res) => {
         description: "A painting by Gustave Courbet",
       },
       {
-        img: "/art/art2.jpg",
+        img: "/art/casca.jpg",
         title: "Archangel",
         artist: "Burial",
         uri: "spotify:track:6evpAJCR5GeeHDGgv3aXb3",
@@ -533,6 +593,71 @@ app.post("/api/cards/seed", async (_req, res) => {
         cover: "/art/vespertine.png",
         description: "From the animated series Love, Death & Robots",
       },
+      {
+        img: "/art/bladeRunner.png",
+        title: "Welcome to the Machine",
+        artist: "Pink Floyd",
+        uri: "spotify:track:5VWC7v2dC2K0SIIjT9WTLN",
+        cover: "/art/wishYouWereHere.png",
+        description: "From the movie Blade Runner",
+      },
+      {
+        img: "/art/bloodborne.jpg",
+        title: "De Profundis (Psalm 129)",
+        artist: "Arvo Pärt",
+        uri: "spotify:track:3L45cLjU7ts5FdQoJrZzQU",
+        cover: "/art/DeProfundis.jpg",
+        description: "From the videogame Bloodborne",
+      },
+            {
+        img: "/art/goya1.jpg",
+        title: "Black Refraction",
+        artist: "Tim Hecker",
+        uri: "spotify:track:4FTPWFrUzsZUYvIC1VSBxU",
+        cover: "/art/virgins.png",
+        description: "A painting by Francisco de Goya",
+      },
+      {
+        img: "/art/francisBacon.png",
+        title: "Guest House",
+        artist: "Daughers",
+        uri: "spotify:track:1rUxy9ClbnIh3MTsRe00ma",
+        cover: "/art/daughters.png",
+        description: "A painting by Francis Bacon",
+      },
+                  {
+        img: "/art/silco.png",
+        title: "Amethyst",
+        artist: "Deafheaven",
+        uri: "spotify:track:3zdMs3UPyhMUCmXOsbFzQ7",
+        cover: "/art/lonelyPeopleWithPower.png",
+        description: "From the animated series Arcane",
+      },
+      {
+        img: "/art/theTrumpeter.png",
+        title: "Homecoming",
+        artist: "White Ward",
+        uri: "spotify:track:63rCFnepqiq0tFKP6hrGsx",
+        cover: "/art/homecoming.png",
+        description: "A painting by Zdzisław Beksiński",
+      },
+            {
+        img: "/art/bigfish.png",
+        title: "Casimir Pulaski Day",
+        artist: "Sufjan Stevens",
+        uri: "spotify:track:53TIOhzNpRpl8xKdscSQSv",
+        cover: "/art/illinoise.png",
+        description: "From the movie Big Fish",
+      },
+            {
+        img: "/art/deathnote1.jpg",
+        title: "Crime of the Century",
+        artist: "Supertramp",
+        uri: "spotify:track:0uOUe1nR390nT5Sxvc5FH7",
+        cover: "/art/crime.png",
+        description: "From the anime Death Note",
+      },
+      
     ];
 
 
@@ -549,6 +674,31 @@ app.post("/api/cards/seed", async (_req, res) => {
     res.status(500).json({ error: "Error insertando cartas" });
   }
 });
+
+
+/* ------------------- DISCOVERY DE HOY ------------------- */
+app.get("/api/discovery/today", async (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) return res.status(400).json({ error: "Falta userId" });
+
+  const now   = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+
+  const log = await prisma.discoveryLog.findFirst({
+    where: {
+      userId,
+      createdAt: { gte: start, lt: end },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  // 404 si hoy aún no eligió
+  if (!log) return res.sendStatus(404);
+
+  res.json(log);           // { id, userId, trackUri, ... }
+});
+
 
 app.listen(Number(PORT), () => {
   console.log(`🚀 Backend escuchando en http://localhost:${PORT}`);
