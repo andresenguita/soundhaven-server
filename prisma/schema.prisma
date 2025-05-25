@@ -48,7 +48,7 @@ model DailyCard {
   date    DateTime
 
   /// ⬇️  Prisma ahora encuentra el campo inverso
-  card    Card     @relation(fields: [cardId], references: [id])
+  card   Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
 
   @@unique([userId, cardId, date])
   @@index([userId, date])
