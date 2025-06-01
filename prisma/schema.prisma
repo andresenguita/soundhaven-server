@@ -19,6 +19,7 @@ model DiscoveryLog {
   trackUri   String                                // URI de la canción (spotify:track:...)
   added      Boolean                               // true si se añadió a la playlist
   createdAt  DateTime @default(now())             // Timestamp automático
+  userPlaylist UserPlaylist @relation(fields: [userId], references: [userId], onDelete: Cascade)
 }
 
 model UserPlaylist {
@@ -49,6 +50,8 @@ model DailyCard {
 
   /// ⬇️  Prisma ahora encuentra el campo inverso
   card   Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userPlaylist UserPlaylist @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
 
   @@unique([userId, cardId, date])
   @@index([userId, date])
